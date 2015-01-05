@@ -1,11 +1,6 @@
-import urllib2 as urllib
-from multiprocessing import Process, Queue, Pool, cpu_count
 import os, sys, time, re, signal, argparse
-import urlparse
-import posixpath
-import atexit
 
-class Main:
+class Downloader:
     verbose = False
 
     def setup_parser(parser):
@@ -24,10 +19,10 @@ class Main:
         out_path_base = args.out
         if not os.path.exists(out_path_base):
             os.makedirs(out_path_base)
-        
+
         Downloader.verbose = args.verbose
 
-        
+
 
 if __name__ == "__main__":
-    main(sys.argv)
+    Downloader.main(sys.argv)

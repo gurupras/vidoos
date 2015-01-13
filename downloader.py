@@ -1,28 +1,36 @@
 import os, sys, time, re, signal, argparse
 
+from netu import NetuDownloader
+from simple_downloader import SimpleDownloader
+
 class Downloader:
-    verbose = False
+	verbose = False
 
-    def setup_parser(parser):
-        parser.add_argument("--out", action="store", type=str, default=None, required=True, help="Path to store output")
-        parser.add_argument("--verbose", action="store_true", default=False, help="Enable verbose output")
-        parser.add_argument("--prefix", action="store", type=str, default='out', help="Prefix to use for output files. Default: out")
-        parser.add_argument("--url", action="store", type=str, default=None, required=True, help="URL to use")
-        return parser
+	@staticmethod
+	def setup_parser(parser):
+		subparsers = parser.add_subparsers(dest='command', title='subcommands', description='Type of downloader', help='Type of downloader to use')
+		# Add the subparsers
+		NetuDownloader.setup_parser(subparsers)
+		SimpleDownloader.setup_parser(subparsers)
+
+		return parser
 
 
-    def main(argv):
-        parser = argparse.ArgumentParser()
-        setup_parser(parser)
-        args   = parser.parse_args(argv[1:])
+	@staticmethod
+	def main(argv):
+		parser = argparse.ArgumentParser(add_help=False)
+		Downloader.setup_parser(parser)
+		args   = parser.parse_args(argv[1:])
 
-        out_path_base = args.out
-        if not os.path.exists(out_path_base):
-            os.makedirs(out_path_base)
+		out_path_base = args.out
+		if not os.path.exists(out_path_base):
+			os.makedirs(out_path_base)
 
-        Downloader.verbose = args.verbose
+		Downloader.verbose = args.verbose
+
+		args.func(args)
 
 
 
 if __name__ == "__main__":
-    Downloader.main(sys.argv)
+	Downloader.main(sys.argv)

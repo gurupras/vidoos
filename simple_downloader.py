@@ -51,7 +51,10 @@ class SimpleDownloader:
 
 			block_size = 10485760
 			with open(out, 'w') as out:
-				for b in response.read(block_size):
+				while 1:
+					b = response.read(block_size)
+					if not b:
+						break
 					out.write(b)
 		except urllib.HTTPError as e:
 			result = '%s :Failed!' % (url)

@@ -2,6 +2,7 @@ import os, sys, time, re, signal, argparse
 
 from netu import NetuDownloader
 from simple_downloader import SimpleDownloader
+from allmyvideos import AllMyVideosDownloader
 
 class Downloader:
 	verbose = False
@@ -12,6 +13,7 @@ class Downloader:
 		# Add the subparsers
 		NetuDownloader.setup_parser(subparsers)
 		SimpleDownloader.setup_parser(subparsers)
+		AllMyVideosDownloader.setup_parser(subparsers)
 
 		return parser
 

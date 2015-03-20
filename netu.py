@@ -5,7 +5,35 @@ from multiprocessing import Process, Queue, Pool, cpu_count
 import argparse
 import posixpath
 import subprocess
+import signal
 
+def download(url, out_path, results):
+	filename = posixpath.basename(urlparse.urlsplit(url).path)
+	try:
+		request  = urllib.Request(url)
+		for key, value in NetuDownloader.headers.iteritems():
+			request.add_header(key, value)
+
+		response = urllib.urlopen(request)
+
+		out = open(out_path, 'wb')
+		for b in response.read():
+			out.write(b)
+		out.close()
+	except urllib.HTTPError as e:
+		result = '%s :Failed!' % (filename)
+		print '    %s' % (e.__repr__())
+		print '    %s' % (result)
+		results.append(result)
+		return
+	except KeyboardInterrupt:
+		raise KeyboardInterruptException()
+	result = '%s :Succeeded!' % (filename)
+	results.append(result)
+	print result
+
+
+class KeyboardInterruptException(Exception) : pass
 
 class NetuDownloader:
 	verbose = False
@@ -17,6 +45,7 @@ class NetuDownloader:
 			'Referer'         : 'http://c.hqq.tv/player/cbplayer/uppod_1.7.0.6.swf',
 			'Connection'      : 'keep-alive'
 	}
+	pool = None
 
 	@staticmethod
 	def setup_parser(parser):
@@ -38,47 +67,20 @@ class NetuDownloader:
 	@staticmethod
 	def custom_range(string):
 		try:
-			range_pattern = re.compile('\[(?P<lower>\d)+:(?P<upper>\d+)]')
+			range_pattern = re.compile('\[(?P<lower>\d+):(?P<upper>\d+)]')
 			range_match   = range_pattern.match(string)
-			if range_match is not None:
-				return range(int(lower), int(upper))
+			if range_match:
+				return range(int(range_match.group('lower')), int(range_match.group('upper')))
 			else:
 				return range(1, int(string))
 		except ValueError as e:
-			print 'Expected integer instead found %s' % (e.__repr__())
+			print 'Expected integer instead found %s' % (e)
 			sys.exit(-1)
 
 
 	@staticmethod
-	def download(url, out_path, results):
-		# Ignore interrupt
-		signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-		filename = posixpath.basename(urlparse.urlsplit(url).path)
-		try:
-			request  = urllib.Request(url)
-			for key, value in Downloader.headers.iteritems():
-				request.add_header(key, value)
-
-			response = urllib.urlopen(request)
-
-			out = open(out_path, 'wb')
-			for b in response.read():
-				out.write(b)
-			out.close()
-		except urllib.HTTPError as e:
-			result = '%s :Failed!' % (filename)
-			print '    %s' % (e.__repr__())
-			print '    %s' % (result)
-			results.append(result)
-			return
-		result = '%s :Succeeded!' % (filename)
-		results.append(result)
-		print result
-
-	@staticmethod
 	def frag_download(args, out_path_base, urls, results):
-		Downloader.pool    = Pool(cpu_count() * 2)
+		NetuDownloader.pool    = Pool(cpu_count() * 2)
 
 		# We have to demangle the URL to pass in frag and num
 		pattern = re.compile('(?P<url_head>http://.*)(?P<frag>Frag\d+)(?P<num>Num\d+)(?P<url_tail>.*)')
@@ -87,16 +89,20 @@ class NetuDownloader:
 			print 'Did not parse URL correctly! \nURL pattern :%s' % (pattern.__repr__())
 			sys.exit(-1)
 
-		for frag in range(1, args.num_frags):
-			for num in range(0, args.num_nums):
+		for frag in args.num_frags:
+			for num in args.num_nums:
 				url = '%sFrag%dNum%d%s' % (m.group('url_head'), frag, num, m.group('url_tail'))
 				urls.append(url)
 				out_path = os.path.join(out_path_base, '%s.mp4Frag%04dNum%04d.ts' % (args.prefix, frag, num))
-				Downloader.pool.apply_async(Downloader.download, [url, out_path, results]).get(99999)
+				try:
+					NetuDownloader.pool.apply_async(download, [url, out_path, results])
+				except Exception as e:
+					raise e
+
 				#Downloader.download(url, out_path, results)
 
-		Downloader.pool.close()
-		Downloader.pool.join()
+		NetuDownloader.pool.close()
+		NetuDownloader.pool.join()
 
 
 	@staticmethod
@@ -105,7 +111,7 @@ class NetuDownloader:
 
 	@staticmethod
 	def main(args):
-		frag_download(args, out_path_base, urls, results)
+		NetuDownloader.frag_download(args, args.out, [], [])
 		if args.stitch is True:
 			stitch_cmdline = 'stitch.sh %s %s' % (out_path_base, args.prefix).split(' ')
 			p = subprocess.Popen(stitch_cmdline)

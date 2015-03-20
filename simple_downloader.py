@@ -33,6 +33,10 @@ class SimpleDownloader:
 		proc = subprocess.Popen(cmdline.split(' '), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		out, err = proc.communicate()
 
+		lines_iterator = iter(proc.stdout.readline, "")
+		for line in lines_iterator:
+			print line.strip()
+
 		lines_iterator = iter(proc.stderr.readline, "")
 		for line in lines_iterator:
 			print line.strip()
@@ -47,15 +51,23 @@ class SimpleDownloader:
 			for key, value in SimpleDownloader.headers.iteritems():
 				request.add_header(key, value)
 
-				response = urllib.urlopen(request)
+			response = urllib.urlopen(request)
 
 			block_size = 10485760
+			size       = int(response.headers['content-length'])
+			read       = 0
 			with open(out, 'w') as out:
 				while 1:
 					b = response.read(block_size)
 					if not b:
 						break
 					out.write(b)
+					read += len(b)
+
+					#FIXME: Make this OS independent
+					os.system('clear')
+					print 'Downloading \'%s\' %d/%d (%d%%' % (out.name, read, size, (size * 100 / read))
+
 		except urllib.HTTPError as e:
 			result = '%s :Failed!' % (url)
 			print '    %s' % (e.__repr__())

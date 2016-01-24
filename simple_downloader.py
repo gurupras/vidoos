@@ -2,6 +2,7 @@ import urllib2 as urllib
 import requests
 import argparse
 import os, sys, time, re
+import multiprocessing
 from multiprocessing import Process
 import subprocess
 import shlex
@@ -75,6 +76,7 @@ class SimpleDownloader:
 		start = 0
 		chunk_size = size / chunks
 		processes = []
+		done = multiprocessing.Value('i', 0)
 		for c in range(chunks):
 			# Start a download task
 			if c == chunks - 1:
@@ -83,20 +85,30 @@ class SimpleDownloader:
 				end = start + chunk_size
 			custom_headers = {}
 			custom_headers['Range'] = 'bytes=%d-%d' % (start, end)
-			p = Process(target=SimpleDownloader._urllib_download, args=(url, out, start, end, custom_headers, c,))
+			p = Process(target=SimpleDownloader._urllib_download, args=(url, out, start, end, done, custom_headers, c,))
 			processes.append(p)
 			#SimpleDownloader._urllib_download(url, out, start, end, custom_headers, c)
 			start += chunk_size
 		try:
 			for p in processes:
 				p.start()
-			for p in processes:
-				p.join(99999999999)
+			while True:
+				#FIXME: Make this OS independent
+				os.system('clear')
+				print 'Downloading \'%s\' %d/%d (%d%%)' % (out, done.value, size, ((done.value * 100) / size))
+
+				still_running = False
+				for p in processes:
+					if p.is_alive():
+						still_running = True
+						p.join(1)
+				if not still_running:
+					break
 		except KeyboardInterrupt, e:
 			raise e
 
 	@staticmethod
-	def _urllib_download(url, out, start, stop, custom_headers={}, idx=-1):
+	def _urllib_download(url, out, start, stop, shared_var, custom_headers={}, idx=-1):
 		print 'Starting thread: %d' % (idx)
 		try:
 			headers = {}
@@ -121,10 +133,8 @@ class SimpleDownloader:
 					out.write(bytez)
 					read += len(bytez)
 					remaining -= len(bytez)
+					shared_var.value += len(bytez)
 
-					#FIXME: Make this OS independent
-					os.system('clear')
-					print 'Thread-%d Downloading \'%s\' %d/%d (%d%%)' % (idx, out.name, read, size, ((read * 100) / size))
 				assert read == size, "Read != size (%d != %d)" % (read, size)
 		except urllib.HTTPError as e:
 			result = '%s :Failed!' % (url)

@@ -1,8 +1,29 @@
 import urllib2 as urllib
+import requests
 import argparse
 import os, sys, time, re
 from multiprocessing import Process
 import subprocess
+import shlex
+
+class CurlAction(argparse.Action):
+	def __call__(self, parser, args, values, option_string=None):
+		tokens = shlex.split(values)
+		headers = []
+		idx = 0
+		while idx < len(tokens):
+			v = tokens[idx]
+			if v == '-H':
+				# Header..add to headers
+				headers.append(tokens[idx + 1])
+			if v == 'curl':
+				url = tokens[idx + 1]
+			idx += 1
+
+		for h in headers:
+			name, value = [x.strip() for x in h.split(':', 1)]
+			SimpleDownloader.headers[name] = value
+		setattr(args, 'url', url)
 
 
 class SimpleDownloader:
@@ -14,15 +35,17 @@ class SimpleDownloader:
 
 	@staticmethod
 	def setup_parser(parser):
-		simple_parser = parser.add_parser('simple')	
+		simple_parser = parser.add_parser('simple')
 
 		# Common stuff
 		simple_parser.add_argument("--out", action="store", type=str, default=None, required=True, help="Path to store output")
 		simple_parser.add_argument("--verbose", action="store_true", default=False, help="Enable verbose output")
 		simple_parser.add_argument("--prefix", action="store", type=str, default='out', help="Prefix to use for output files. Default: out")
-		simple_parser.add_argument("--url", action="store", type=str, default=None, required=True, help="URL to use")
+		simple_parser.add_argument("--url", action="store", type=str, default=None, help="URL to use")
+		simple_parser.add_argument("--curl", action=CurlAction, type=str, default=None, help="cURL URL to use")
 
 		simple_parser.add_argument('--wget', action="store_true", default=False, help="Use wget instead of urllib2")
+		simple_parser.add_argument('-j', '--threads', type=int, default=1, help='Number of chunks to split into and download in parallel')
 		simple_parser.set_defaults(func=SimpleDownloader.main)
 
 		return parser;
@@ -45,37 +68,73 @@ class SimpleDownloader:
 
 
 	@staticmethod
-	def urllib_download(url, out):
+	def urllib_download(url, out, chunks):
+		# First get total download size and then split it
+		response = requests.head(url)
+		size = int(response.headers['Content-Length'])
+		start = 0
+		chunk_size = size / chunks
+		processes = []
+		for c in range(chunks):
+			# Start a download task
+			if c == chunks - 1:
+				end = size
+			else:
+				end = start + chunk_size
+			custom_headers = {}
+			custom_headers['Range'] = 'bytes=%d-%d' % (start, end)
+			p = Process(target=SimpleDownloader._urllib_download, args=(url, out, start, end, custom_headers, c,))
+			processes.append(p)
+			#SimpleDownloader._urllib_download(url, out, start, end, custom_headers, c)
+			start += chunk_size
 		try:
-			request  = urllib.Request(url)
+			for p in processes:
+				p.start()
+			for p in processes:
+				p.join(99999999999)
+		except KeyboardInterrupt, e:
+			raise e
+
+	@staticmethod
+	def _urllib_download(url, out, start, stop, custom_headers={}, idx=-1):
+		print 'Starting thread: %d' % (idx)
+		try:
+			headers = {}
 			for key, value in SimpleDownloader.headers.iteritems():
-				request.add_header(key, value)
+				headers[key] = value
+			for key, value in custom_headers.iteritems():
+				headers[key] = value
 
-			response = urllib.urlopen(request)
-
-			block_size = 10485760
+			response = requests.get(url, headers=headers, stream=True)
+			block_size = 1048576
 			size       = int(response.headers['content-length'])
 			read       = 0
 			with open(out, 'w') as out:
-				while 1:
-					b = response.read(block_size)
-					if not b:
+				out.seek(start)
+				size = stop - start
+				remaining = size
+				while remaining > 0:
+					bs = block_size if block_size < remaining else remaining
+					bytez = response.raw.read(bs)
+					if not bytez:
 						break
-					out.write(b)
-					read += len(b)
+					out.write(bytez)
+					read += len(bytez)
+					remaining -= len(bytez)
 
 					#FIXME: Make this OS independent
 					os.system('clear')
-					print 'Downloading \'%s\' %d/%d (%d%%' % (out.name, read, size, (size * 100 / read))
-
+					print 'Thread-%d Downloading \'%s\' %d/%d (%d%%)' % (idx, out.name, read, size, ((read * 100) / size))
+				assert read == size, "Read != size (%d != %d)" % (read, size)
 		except urllib.HTTPError as e:
 			result = '%s :Failed!' % (url)
 			print '    %s' % (e.__repr__())
 			print '    %s' % (result)
-			results.append(result)
+			#results.append(result)
 			return
 
 		result = '%s :Succeeded!' % (url)
+
 
 	@staticmethod
 	def main(args):
@@ -84,4 +143,6 @@ class SimpleDownloader:
 		if args.wget is True:
 			SimpleDownloader.wget_download(args.url, out)
 		else:
-			SimpleDownloader.urllib_download(args.url, out)
+			SimpleDownloader.urllib_download(args.url, out, chunks=args.threads)
+
+

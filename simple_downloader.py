@@ -7,6 +7,8 @@ from multiprocessing import Process
 import subprocess
 import shlex
 
+import pycommons
+
 class CurlAction(argparse.Action):
 	def __call__(self, parser, args, values, option_string=None):
 		tokens = shlex.split(values)
@@ -47,6 +49,7 @@ class SimpleDownloader:
 
 		simple_parser.add_argument('--wget', action="store_true", default=False, help="Use wget instead of urllib2")
 		simple_parser.add_argument('-j', '--threads', type=int, default=1, help='Number of chunks to split into and download in parallel')
+		simple_parser.add_argument('--buffer-size', action=pycommons.SizeAction, type=str, default='10M', help='Buffer Size')
 		simple_parser.set_defaults(func=SimpleDownloader.main)
 
 		return parser;
@@ -69,7 +72,7 @@ class SimpleDownloader:
 
 
 	@staticmethod
-	def urllib_download(url, out, chunks):
+	def urllib_download(url, out, buffer_size, chunks):
 		# First get total download size and then split it
 		response = requests.head(url)
 		size = int(response.headers['Content-Length'])
@@ -77,6 +80,7 @@ class SimpleDownloader:
 		chunk_size = size / chunks
 		processes = []
 		done = multiprocessing.Value('i', 0)
+		progress_condition = multiprocessing.Value('i', 1)
 		for c in range(chunks):
 			# Start a download task
 			if c == chunks - 1:
@@ -85,30 +89,37 @@ class SimpleDownloader:
 				end = start + chunk_size
 			custom_headers = {}
 			custom_headers['Range'] = 'bytes=%d-%d' % (start, end)
-			p = Process(target=SimpleDownloader._urllib_download, args=(url, out, start, end, done, custom_headers, c,))
+			p = Process(target=SimpleDownloader._urllib_download, args=(url, out, buffer_size, start, end, done, custom_headers, c,))
 			processes.append(p)
 			#SimpleDownloader._urllib_download(url, out, start, end, custom_headers, c)
 			start += chunk_size
 		try:
 			for p in processes:
 				p.start()
-			while True:
-				#FIXME: Make this OS independent
-				os.system('clear')
-				print 'Downloading \'%s\' %d/%d (%d%%)' % (out, done.value, size, ((done.value * 100) / size))
 
-				still_running = False
-				for p in processes:
-					if p.is_alive():
-						still_running = True
-						p.join(1)
-				if not still_running:
-					break
+			time.sleep(1)
+			progress_proc = Process(target=SimpleDownloader.progress_handler, args=(out, done, size, progress_condition,))
+			progress_proc.start()
+
+			for p in processes:
+				p.join(99999999999)
+
+			print 'All threads done..terminating progress thread'
+			progress_condition.value = 0
+			progress_proc.join(5)
 		except KeyboardInterrupt, e:
 			raise e
 
 	@staticmethod
-	def _urllib_download(url, out, start, stop, shared_var, custom_headers={}, idx=-1):
+	def progress_handler(out, progress, total, condition):
+		while condition.value == 1:
+			#FIXME: Make this OS independent
+			os.system('clear')
+			print 'Downloading \'%s\' %d/%d (%d%%)' % (out, progress.value, total, ((progress.value * 100) / total))
+			time.sleep(1)
+
+	@staticmethod
+	def _urllib_download(url, out, buffer_size, start, stop, shared_var, custom_headers={}, idx=-1):
 		print 'Starting thread: %d' % (idx)
 		try:
 			headers = {}
@@ -118,15 +129,14 @@ class SimpleDownloader:
 				headers[key] = value
 
 			response = requests.get(url, headers=headers, stream=True)
-			block_size = 1048576
-			size       = int(response.headers['content-length'])
-			read       = 0
+			size = int(response.headers['content-length'])
+			read = 0
 			with open(out, 'w') as out:
 				out.seek(start)
 				size = stop - start
 				remaining = size
 				while remaining > 0:
-					bs = block_size if block_size < remaining else remaining
+					bs = buffer_size if buffer_size < remaining else remaining
 					bytez = response.raw.read(bs)
 					if not bytez:
 						break
@@ -150,9 +160,11 @@ class SimpleDownloader:
 	def main(args):
 		out = '%s/%s' % (args.out, args.prefix)
 
+		print 'Using buffer size: %d' % (args.buffer_size)
+
 		if args.wget is True:
 			SimpleDownloader.wget_download(args.url, out)
 		else:
-			SimpleDownloader.urllib_download(args.url, out, chunks=args.threads)
+			SimpleDownloader.urllib_download(args.url, out, args.buffer_size, chunks=args.threads)
 
 

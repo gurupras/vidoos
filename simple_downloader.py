@@ -103,12 +103,19 @@ class SimpleDownloader:
 
 			for p in processes:
 				p.join(99999999999)
-
-			print 'All threads done..terminating progress thread'
-			progress_condition.value = 0
-			progress_proc.join(5)
 		except KeyboardInterrupt, e:
 			raise e
+
+		print 'All threads done..terminating progress thread'
+		progress_condition.value = 0
+		progress_proc.join(5)
+
+		# Sync FS
+		print 'sync() ...'
+		with open(out) as f:
+			os.fsync(f.fileno())
+
+		print 'Done'
 
 	@staticmethod
 	def progress_handler(out, progress, total, condition):
